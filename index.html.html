@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Telco LEC Map — US Carriers by State</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; background: #f5f5f3; color: #1a1a1a; min-height: 100vh; }
+  header { background: #fff; border-bottom: 1px solid #e0e0dc; padding: 14px 24px; display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+  header h1 { font-size: 17px; font-weight: 500; color: #1a1a1a; flex: 1; min-width: 180px; }
+  .controls { display: flex; gap: 8px; flex-wrap: wrap; }
+  .controls input, .controls select { font-size: 13px; padding: 6px 10px; border: 1px solid #d0d0cc; border-radius: 8px; background: #fff; color: #1a1a1a; outline: none; }
+  .controls input:focus, .controls select:focus { border-color: #888; }
+  .controls input { width: 180px; }
+  main { max-width: 1100px; margin: 0 auto; padding: 20px 16px; }
+  #map-container { position: relative; background: #fff; border-radius: 12px; border: 1px solid #e0e0dc; padding: 8px; }
+  #map-container svg { width: 100%; height: auto; display: block; }
+  .state-path { cursor: pointer; stroke: #fff; stroke-width: 0.6; transition: opacity 0.12s; }
+  .state-path:hover { opacity: 0.72; stroke-width: 1.8; }
+  .state-path.selected { stroke: #111; stroke-width: 2.2; }
+  #tooltip { position: absolute; background: #fff; border: 1px solid #d0d0cc; border-radius: 12px; padding: 12px 14px; font-size: 13px; pointer-events: none; display: none; min-width: 220px; max-width: 280px; z-index: 20; box-shadow: 0 4px 16px rgba(0,0,0,0.1); }
+  #tooltip h3 { font-size: 14px; font-weight: 500; color: #1a1a1a; margin-bottom: 8px; }
+  .carrier-row { display: flex; align-items: flex-start; gap: 7px; margin-bottom: 5px; }
+  .carrier-dot { width: 8px; height: 8px; border-radius: 50%; margin-top: 4px; flex-shrink: 0; }
+  .carrier-name { font-size: 12px; color: #1a1a1a; font-weight: 500; }
+  .carrier-type { font-size: 11px; color: #666; }
+  #legend { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 12px; padding: 0 4px; }
+  .legend-item { display: flex; align-items: center; gap: 6px; font-size: 12px; color: #555; }
+  .legend-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+  #detail-panel { margin-top: 16px; background: #fff; border-radius: 12px; border: 1px solid #e0e0dc; padding: 16px 20px; display: none; }
+  #detail-panel h2 { font-size: 15px; font-weight: 500; color: #1a1a1a; margin-bottom: 14px; }
+  .carrier-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 8px; }
+  .carrier-card { background: #f9f9f7; border: 1px solid #e8e8e4; border-radius: 8px; padding: 9px 11px; }
+  .carrier-card .cname { font-size: 13px; font-weight: 500; color: #1a1a1a; }
+  .cbadge { display: inline-block; margin-top: 5px; font-size: 10px; padding: 2px 7px; border-radius: 99px; font-weight: 500; }
+  .badge-ilec { background: #daeaf8; color: #0c447c; }
+  .badge-clec { background: #ddf0cc; color: #2a5010; }
+  .badge-cable { background: #fdefd4; color: #5c3300; }
+  .badge-wireless { background: #eae8fd; color: #3c3489; }
+  footer { text-align: center; font-size: 11px; color: #aaa; padding: 24px 16px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Telco LEC Map — US Carriers by State</h1>
+  <div class="controls">
+    <input type="text" id="search" placeholder="Search state…" oninput="filterState(this.value)" />
+    <select id="carrier-filter" onchange="applyFilter()">
+      <option value="all">All carrier types</option>
+      <option value="ILEC">ILEC only</option>
+      <option value="CLEC">CLEC only</option>
+      <option value="Cable">Cable only</option>
+      <option value="Wireless">Wireless only</option>
+    </select>
+  </div>
+</header>
+<main>
+  <div id="map-container">
+    <svg id="us-map" viewBox="0 0 960 600" xmlns="http://www.w3.org/2000/svg"></svg>
+    <div id="tooltip"></div>
+  </div>
+  <div id="legend">
+    <div class="legend-item"><div class="legend-dot" style="background:#378ADD"></div> ILEC (Incumbent Local Exchange Carrier)</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#639922"></div> CLEC (Competitive LEC)</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#BA7517"></div> Cable / MSO</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#7F77DD"></div> Wireless</div>
+    <div class="legend-item" style="margin-left:auto;color:#aaa;">Click a state to see full carrier list</div>
+  </div>
+  <div id="detail-panel">
+    <h2 id="detail-title"></h2>
+    <div class="carrier-grid" id="detail-grid"></div>
+  </div>
+</main>
+<footer>Data reflects major carrier presence as of 2024–2025. Some regional/rural carriers may not be listed.</footer>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.8.5/d3.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/topojson/3.0.2/topojson.min.js"></script>
+<script>
+const stateCarriers = {
+  "Alabama":[{name:"AT&T Alabama",type:"ILEC"},{name:"Windstream",type:"ILEC"},{name:"Charter/Spectrum",type:"Cable"},{name:"Comcast",type:"Cable"},{name:"Verizon",type:"Wireless"},{name:"T-Mobile",type:"Wireless"}],
+  "Alaska":[{name:"Alaska Communications (ACS)",type:"ILEC"},{name:"GCI",type:"CLEC"},{name:"AT&T",type:"Wireless"},{name:"T-Mobile",type:"Wireless"}],
+  "Arizona":[{name:"CenturyLink/Lumen (Qwest)",type:"ILEC"},{name:"Cox Communications",type:"Cable"},{name:"Cox Business",type:"CLEC"},{name:"Comcast",type:"Cable"},{name:"Verizon",type:"Wireless"},{name:"T-Mobile",type:"Wireless"}],
+  "Arkansas":[{name:"AT&T Arkansas",type:"ILEC"},{name:"Windstream",type:"ILEC"},{name:"Ritter Communications",type:"CLEC"},{name:"Charter/Spectrum",type:"Cable"},{name:"T-Mobile",type:"Wireless"}],
+  "California":[{name:"AT&T California",type:"ILEC"},{name:"Frontier CA",type:"ILEC"},{name:"Comcast",type:"Cable"},{name:"Charter/Spectrum",type:"Cable"},{name:"Cox",type:"Cable"},{name:"Lumen/CenturyLink",type:"CLEC"},{name:"Verizon",type:"Wireless"},{name:"T-Mobile",type:"Wireless"}],
+  "Colorado":[{name:"CenturyLink/Lumen",type:"ILEC"},{name:"Comcast",type:"Cable"},{name:"Charter/Spectrum",type:"Cable"},{name:"Zayo",type:"CLEC"},{name:"T-Mobile",type:"Wireless"},{name:"Verizon",type:"Wireless"}],
+  "Connecticut":[{name:"Frontier CT",type:"ILEC"},{name:"Altice/Optimum",type:"Cable"},{name:"Cox",type:"Cable"},{name:"Comcast",type:"Cable"},{name:"Verizon",type:"Wireless"},{name:"T-Mobile",type:"Wireless"}],
+  "Delaware":[{name:"Verizon Delaware",type:"ILEC"},{name:"Comcast",type:"Cable"},{name:"Mediacom",type:"Cable"},{name:"T-Mobile",type:"Wireless"}],
+  "Florida":[{name:"AT&T Florida",type:"ILEC"},{name:"Frontier FL",type:"ILEC"},{name:"Comcast",type:"Cable"},{name:"Charter/Spectrum",type:"Cable"},{name:"Cox",type:"Cable"},{name:"Brightspeed",type:"CLEC"},{name:"Verizon",type:"Wireless"},{name:"T-Mobile",type:"Wireless"}],
+  "Georgia":[{name:"AT&T Georgia",type:"ILEC"},{name:"Windstream",type:"ILEC"},{name:"Comcast",type:"Cable"},{name:"Charter/Spectrum",type:"Cable"},{name:"Cox",type:"Cable"},{name:"Verizon",type:"Wireless"},{name:"T-Mobile",type:"Wireless"}],
+  "Hawaii":[{name:"Hawaiian Telcom",type:"ILEC"},{name:"Spectrum/Charter",type:"Cable"},{name:"T-Mobile",type:"Wireless"},{name:"AT&T",type:"Wireless"}],
+  "Idaho":[{name:"CenturyLink/Lumen",type:"ILEC"},{name:"Frontier ID",type:"ILEC"},{name:"Cable ONE/Sparklight",type:"Cable"},{name:"T-Mobile",type:"Wireless"},{name:"Verizon",type:"Wireless"}],
+  "Illinois":[{name:"AT&T Illinois",type:"ILEC"},{name:"Consolidated Communications",type:"ILEC"},{name:"Comcast",type:"Cable"},{name:"Charter/Spectrum",type:"Cable"},{name:"Mediacom",type:"Cable"},{name:"RCN",type:"CLEC"},{name:"Verizon",type:"Wireless"},{name:"T-Mobile",type:"Wireless"}],
+  "Indiana":[{name:"AT&T Indiana",type:"ILEC"},{name:"Consolidated Communications",type:"ILEC"},{name:"Comcast",type:"Cable"},{name:"Charter/Spectrum",type:"Cable"},{name:"T-Mobile",type:"Wireless"},{name:"Verizon",type:"Wireless"}],
+  "Iowa":[{name:"CenturyLink/Lumen",type:"ILEC"},{name:"Windstream",type:"ILEC"},{name:"McLeodUSA",type:"CLEC"},{name:"Mediacom",type:"Cable"},{name:"T-Mobile",type:"Wireless"},{name:"Verizon",type:"Wireless"}],
+  "Kansas":[{name:"AT&T Kansas",type:"ILEC"},{name:"CenturyLink/Lumen",type:"ILEC"},{name:"Cox",type:"Cable"},{name:"Charter/Spectrum",type:"Cable"},{name:"T-Mobile",type:"Wireless"},{name:"Verizon",type:"Wireless"}],
+  "Kentucky":[{name:"AT&T Kentucky",type:"ILEC"},{name:"Windstream",type:"ILEC"},{name:"Charter/Spectrum",type:"Cable"},{name:"Comcast",type:"Cable"},{name:"T-Mobile",type:"Wireless"},{name:"Verizon",type:"Wireless"}],
+  "Louisiana":[{name:"AT&T Louisiana",type:"ILEC"},{name:"CenturyLink/Lumen",type:"ILEC"},{name:"Charter/Spectrum",type:"Cable"},{name:"Cox",type:"Cable"},{name:"T-Mobile",type:"Wireless"},{name:"Verizon",type:"Wireless"}],
+  "Maine":[{name:"Consolidated Communications",type:"ILEC"},{name:"Spectrum/Charter",type:"Cable"},{name:"Comcast",type:"Cable"},{name:"T-Mobile",type:"Wireless"},{name:"Verizon",type:"Wireless"}],
+  "Maryland":[{name:"Verizon Maryland",type:"ILEC"},{name:"Comcast",type:"Cable"},{name:"RCN",type:"CLEC"},{name:"Cox",type:"Cable"},{name:"Verizon",type:"Wireless"},{name:"T-Mobile",type:"Wireless"}],
+  "Massachusetts":[{name:"Verizon MA",type:"ILEC"},{name:"Consolidated Communications",type:"ILEC"},{name:"Comcast",type:"Cable"},{name:"Charter/Spectrum",type:"Cable"},{name:"RCN",type:"CLEC"},{name:"Verizon",type:"Wireless"},{name:"T-Mobile",type:"Wireless"}],
+  "Michigan":[{name:"AT&T Michigan",type:"ILEC"},{name:"Frontier MI",type:"ILEC"},{name:"Comcast",type:"Cable"},{name:"Charter/Spectrum",type:"Cable"},{name:"WideOpenWest (WOW)",type:"CLEC"},{name:"Verizon",type:"Wireless"},{name:"T-Mobile",type:"Wireless"}],
+  "Minnesota":[{name:"CenturyLink/Lumen",type:"ILEC"},{name:"Frontier MN",type:"ILEC"},{name:"Comcast",type:"Cable"},{name:"Charter/Spectrum",type:"Cable"},{name:"Mediacom",type:"Cable"},{name:"T-Mobile",type:"Wireless"},{name:"Verizon",type:"Wireless"}],
+  "Mississippi":[{name:"AT&T Mississippi",type:"ILEC"},{name:"Windstream",type:"ILEC"},{name:"Charter/Spectrum",type:"Cable"},{name:"Comcast",type:"Cable"},{name:"T-Mobile",type:"Wireless"},{name:"Verizon",type:"Wireless"}],
+  "Missouri":[{name:"AT&T Missouri",type:"ILEC"},{name:"CenturyLink/Lumen",type:"ILEC"},{name:"Consolidated",type:"ILEC"},{name:"Charter/Spectrum",type:"Cable"},{name:"Comcast",type:"Cable"},{name:"T-Mobile",type:"Wireless"},{name:"Verizon",type:"Wireless"}],
+  "Montana":[{name:"CenturyLink/Lumen",type:"ILEC"},{name:"Blackfoot Telecom",type:"ILEC"},{name:"Charter/Spectrum",type:"Cable"},{name:"T-Mobile",type:"Wireless"},{name:"Verizon",type:"Wireless"}],
+  "Nebraska":[{name:"CenturyLink/Lumen",type:"ILEC"},{name:"Windstream",type:"ILEC"},{name:"Cox",type:"Cable"},{name:"Charter/Spectrum",type:"Cable"},{name:"T-Mobile",type:"Wireless"},{name:"Verizon",type:"Wireless"}],
+  "Nevada":[{name:"CenturyLink/Lumen",type:"ILEC"},{name:"Cox",type:"Cable"},{name:"Charter/Spectrum",type:"Cable"},{name:"Comcast",type:"Cable"},{name:"T-Mobile",type:"Wireless"},{name:"Verizon",type:"Wireless"}],
+  "New Hampshire":[{name:"Consolidated Communications",type:"ILEC"},{name:"Comcast",type:"Cable"},{name:"Charter/Spectrum",type:"Cable"},{name:"Verizon",type:"Wireless"},{name:"T-Mobile",type:"Wireless"}],
+  "New Jersey":[{name:"Verizon NJ",type:"ILEC"},{name:"Comcast",type:"Cable"},{name:"Altice/Optimum",type:"Cable"},{name:"RCN",type:"CLEC"},{name:"Verizon",type:"Wireless"},{name:"T-Mobile",type:"Wireless"}],
+  "New Mexico":[{name:"CenturyLink/Lumen",type:"ILEC"},{name:"Windstream",type:"ILEC"},{name:"Charter/Spectrum",type:"Cable"},{name:"Comcast",type:"Cable"},{name:"T-Mobile",type:"Wireless"},{name:"Verizon",type:"Wireless"}],
+  "New York":[{name:"Verizon NY",type:"ILEC"},{name:"Frontier NY",type:"ILEC"},{name:"Comcast",type:"Cable"},{name:"Altice/Optimum",type:"Cable"},{name:"Charter/Spectrum",type:"Cable"},{name:"RCN",type:"CLEC"},{name:"Verizon",type:"Wireless"},{name:"T-Mobile",type:"Wireless"}],
+  "North Carolina":[{name:"AT&T NC",type:"ILEC"},{name:"Windstream",type:"ILEC"},{name:"CenturyLink/Lumen",type:"ILEC"},{name:"Charter/Spectrum",type:"Cable"},{name:"Comcast",type:"Cable"},{name:"Brightspeed",type:"CLEC"},{name:"T-Mobile",type:"Wireless"},{name:"Verizon",type:"Wireless"}],
+  "North Dakota":[{name:"CenturyLink/Lumen",type:"ILEC"},{name:"Midcontinent",type:"Cable"},{name:"T-Mobile",type:"Wireless"},{name:"Verizon",type:"Wireless"}],
+  "Ohio":[{name:"AT&T Ohio",type:"ILEC"},{name:"Frontier OH",type:"ILEC"},{name:"Comcast",type:"Cable"},{name:"Charter/Spectrum",type:"Cable"},{name:"WideOpenWest (WOW)",type:"CLEC"},{name:"Verizon",type:"Wireless"},{name:"T-Mobile",type:"Wireless"}],
+  "Oklahoma":[{name:"AT&T Oklahoma",type:"ILEC"},{name:"CenturyLink/Lumen",type:"ILEC"},{name:"Cox",type:"Cable"},{name:"Charter/Spectrum",type:"Cable"},{name:"T-Mobile",type:"Wireless"},{name:"Verizon",type:"Wireless"}],
+  "Oregon":[{name:"CenturyLink/Lumen",type:"ILEC"},{name:"Frontier OR",type:"ILEC"},{name:"Comcast",type:"Cable"},{name:"Charter/Spectrum",type:"Cable"},{name:"T-Mobile",type:"Wireless"},{name:"Verizon",type:"Wireless"}],
+  "Pennsylvania":[{name:"Verizon PA",type:"ILEC"},{name:"Frontier PA",type:"ILEC"},{name:"Consolidated",type:"ILEC"},{name:"Comcast",type:"Cable"},{name:"Charter/Spectrum",type:"Cable"},{name:"Altice/Optimum",type:"Cable"},{name:"RCN",type:"CLEC"},{name:"Verizon",type:"Wireless"},{name:"T-Mobile",type:"Wireless"}],
+  "Rhode Island":[{name:"Verizon RI",type:"ILEC"},{name:"Cox",type:"Cable"},{name:"Charter/Spectrum",type:"Cable"},{name:"Verizon",type:"Wireless"},{name:"T-Mobile",type:"Wireless"}],
+  "South Carolina":[{name:"AT&T SC",type:"ILEC"},{name:"Windstream",type:"ILEC"},{name:"Charter/Spectrum",type:"Cable"},{name:"Comcast",type:"Cable"},{name:"Verizon",type:"Wireless"},{name:"T-Mobile",type:"Wireless"}],
+  "South Dakota":[{name:"CenturyLink/Lumen",type:"ILEC"},{name:"Midcontinent",type:"Cable"},{name:"T-Mobile",type:"Wireless"},{name:"Verizon",type:"Wireless"}],
+  "Tennessee":[{name:"AT&T Tennessee",type:"ILEC"},{name:"Windstream",type:"ILEC"},{name:"Charter/Spectrum",type:"Cable"},{name:"Comcast",type:"Cable"},{name:"T-Mobile",type:"Wireless"},{name:"Verizon",type:"Wireless"}],
+  "Texas":[{name:"AT&T Texas",type:"ILEC"},{name:"Windstream",type:"ILEC"},{name:"Comcast",type:"Cable"},{name:"Charter/Spectrum",type:"Cable"},{name:"Cox",type:"Cable"},{name:"Grande Communications",type:"CLEC"},{name:"Verizon",type:"Wireless"},{name:"T-Mobile",type:"Wireless"}],
+  "Utah":[{name:"CenturyLink/Lumen",type:"ILEC"},{name:"Comcast",type:"Cable"},{name:"Charter/Spectrum",type:"Cable"},{name:"T-Mobile",type:"Wireless"},{name:"Verizon",type:"Wireless"}],
+  "Vermont":[{name:"Consolidated Communications",type:"ILEC"},{name:"Comcast",type:"Cable"},{name:"Charter/Spectrum",type:"Cable"},{name:"T-Mobile",type:"Wireless"},{name:"Verizon",type:"Wireless"}],
+  "Virginia":[{name:"Verizon VA",type:"ILEC"},{name:"CenturyLink/Lumen",type:"ILEC"},{name:"Comcast",type:"Cable"},{name:"Cox",type:"Cable"},{name:"Charter/Spectrum",type:"Cable"},{name:"Verizon",type:"Wireless"},{name:"T-Mobile",type:"Wireless"}],
+  "Washington":[{name:"CenturyLink/Lumen",type:"ILEC"},{name:"Frontier WA",type:"ILEC"},{name:"Comcast",type:"Cable"},{name:"Charter/Spectrum",type:"Cable"},{name:"T-Mobile",type:"Wireless"},{name:"Verizon",type:"Wireless"}],
+  "West Virginia":[{name:"Frontier WV",type:"ILEC"},{name:"Comcast",type:"Cable"},{name:"Charter/Spectrum",type:"Cable"},{name:"Verizon",type:"Wireless"},{name:"T-Mobile",type:"Wireless"}],
+  "Wisconsin":[{name:"AT&T Wisconsin",type:"ILEC"},{name:"CenturyLink/Lumen",type:"ILEC"},{name:"Frontier WI",type:"ILEC"},{name:"TDS Telecom",type:"ILEC"},{name:"Comcast",type:"Cable"},{name:"Charter/Spectrum",type:"Cable"},{name:"T-Mobile",type:"Wireless"},{name:"Verizon",type:"Wireless"}],
+  "Wyoming":[{name:"CenturyLink/Lumen",type:"ILEC"},{name:"Charter/Spectrum",type:"Cable"},{name:"T-Mobile",type:"Wireless"},{name:"Verizon",type:"Wireless"}],
+  "District of Columbia":[{name:"Verizon DC",type:"ILEC"},{name:"RCN",type:"CLEC"},{name:"Comcast",type:"Cable"},{name:"Verizon",type:"Wireless"},{name:"T-Mobile",type:"Wireless"}]
+};
+
+const typeColors={ILEC:"#378ADD",CLEC:"#639922",Cable:"#BA7517",Wireless:"#7F77DD"};
+const typeBadge={ILEC:"badge-ilec",CLEC:"badge-clec",Cable:"badge-cable",Wireless:"badge-wireless"};
+let activeFilter="all", selectedState=null;
+
+function dominantColor(state){
+  const c=stateCarriers[state]||[];
+  const cnt={};
+  c.forEach(x=>{cnt[x.type]=(cnt[x.type]||0)+1;});
+  const dom=Object.entries(cnt).sort((a,b)=>b[1]-a[1])[0];
+  return dom?typeColors[dom[0]]:"#B4B2A9";
+}
+function getStateColor(state){
+  const c=stateCarriers[state]||[];
+  if(activeFilter==="all") return dominantColor(state);
+  return c.some(x=>x.type===activeFilter)?typeColors[activeFilter]:"#D8D8D4";
+}
+
+const svg=d3.select("#us-map");
+const tooltip=document.getElementById("tooltip");
+const detailPanel=document.getElementById("detail-panel");
+const detailTitle=document.getElementById("detail-title");
+const detailGrid=document.getElementById("detail-grid");
+const projection=d3.geoAlbersUsa().scale(1280).translate([480,300]);
+const path=d3.geoPath().projection(projection);
+
+const stateNames={"01":"Alabama","02":"Alaska","04":"Arizona","05":"Arkansas","06":"California","08":"Colorado","09":"Connecticut","10":"Delaware","11":"District of Columbia","12":"Florida","13":"Georgia","15":"Hawaii","16":"Idaho","17":"Illinois","18":"Indiana","19":"Iowa","20":"Kansas","21":"Kentucky","22":"Louisiana","23":"Maine","24":"Maryland","25":"Massachusetts","26":"Michigan","27":"Minnesota","28":"Mississippi","29":"Missouri","30":"Montana","31":"Nebraska","32":"Nevada","33":"New Hampshire","34":"New Jersey","35":"New Mexico","36":"New York","37":"North Carolina","38":"North Dakota","39":"Ohio","40":"Oklahoma","41":"Oregon","42":"Pennsylvania","44":"Rhode Island","45":"South Carolina","46":"South Dakota","47":"Tennessee","48":"Texas","49":"Utah","50":"Vermont","51":"Virginia","53":"Washington","54":"West Virginia","55":"Wisconsin","56":"Wyoming"};
+
+fetch("https://cdn.jsdelivr.net/npm/us-atlas@3/states-10m.json")
+  .then(r=>r.json())
+  .then(us=>{
+    const states=topojson.feature(us,us.objects.states);
+    window._states=states;
+    svg.selectAll(".state-path")
+      .data(states.features)
+      .enter().append("path")
+      .attr("class","state-path")
+      .attr("d",path)
+      .attr("fill",d=>getStateColor(stateNames[String(d.id).padStart(2,"0")]))
+      .attr("data-state",d=>stateNames[String(d.id).padStart(2,"0")])
+      .on("mousemove",function(event,d){
+        const name=stateNames[String(d.id).padStart(2,"0")];
+        if(!name) return;
+        const carriers=stateCarriers[name]||[];
+        const filtered=activeFilter==="all"?carriers:carriers.filter(c=>c.type===activeFilter);
+        if(!filtered.length&&activeFilter!=="all"){tooltip.style.display="none";return;}
+        let html=`<h3>${name}</h3>`;
+        filtered.slice(0,6).forEach(c=>{html+=`<div class="carrier-row"><div class="carrier-dot" style="background:${typeColors[c.type]}"></div><div><div class="carrier-name">${c.name}</div><div class="carrier-type">${c.type}</div></div></div>`;});
+        if(filtered.length>6) html+=`<div style="font-size:11px;color:#888;margin-top:4px;">+${filtered.length-6} more — click to see all</div>`;
+        tooltip.innerHTML=html;
+        tooltip.style.display="block";
+        const rect=document.getElementById("map-container").getBoundingClientRect();
+        const ex=event.clientX-rect.left, ey=event.clientY-rect.top;
+        tooltip.style.left=Math.min(ex+12,rect.width-240)+"px";
+        tooltip.style.top=Math.max(ey-20,0)+"px";
+      })
+      .on("mouseleave",()=>{tooltip.style.display="none";})
+      .on("click",function(event,d){
+        const name=stateNames[String(d.id).padStart(2,"0")];
+        if(!name) return;
+        svg.selectAll(".state-path").classed("selected",false);
+        d3.select(this).classed("selected",true);
+        selectedState=name;
+        showDetail(name);
+      });
+  });
+
+function showDetail(name){
+  const carriers=stateCarriers[name]||[];
+  const filtered=activeFilter==="all"?carriers:carriers.filter(c=>c.type===activeFilter);
+  detailTitle.textContent=name+" — Telecom Carriers";
+  detailGrid.innerHTML=filtered.map(c=>`<div class="carrier-card"><div class="cname">${c.name}</div><div class="cbadge ${typeBadge[c.type]}">${c.type}</div></div>`).join("");
+  detailPanel.style.display="block";
+  detailPanel.scrollIntoView({behavior:"smooth",block:"nearest"});
+}
+
+function applyFilter(){
+  activeFilter=document.getElementById("carrier-filter").value;
+  svg.selectAll(".state-path").attr("fill",function(){return getStateColor(d3.select(this).attr("data-state"));});
+  if(selectedState) showDetail(selectedState);
+}
+
+function filterState(val){
+  if(!val.trim()) return;
+  const match=Object.keys(stateCarriers).find(s=>s.toLowerCase().startsWith(val.toLowerCase()));
+  if(match){showDetail(match);}
+}
+</script>
+</body>
+</html>
